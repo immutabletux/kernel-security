@@ -1,1 +1,44 @@
+kernel-hardening.sh
 
+Applies the Timesys kernel-hardening configuration recommendations to a Linux kernel .config file using the kernel's own scripts/config helper.
+
+It covers stack/heap protection, hardened usercopy, KASLR, Spectre mitigations, ARM64-specific options, module signing, syscall surface reduction, LSM/lockdown, physical memory access restrictions, legacy driver/interface removal, tracing/debug interface removal, sanitizers, IOMMU/DMA protection, and filesystem integrity (dm-verity/dm-crypt/IMA/EVM).
+
+Works against any modern kernel source tree (developed against 7.1.3, but uses no version-specific logic) — options that don't exist in your tree's Kconfig are silently skipped rather than causing a failure.
+
+Requirements
+A Linux kernel source tree containing scripts/config (present in any kernel git checkout or release tarball)
+An existing .config in that tree (run make defconfig first if you don't have one yet)
+bash
+Usage
+bash
+./kernel-hardening.sh /path/to/kernel-source [/path/to/.config]
+Argument	Required	Description
+/path/to/kernel-source	Yes	Path to the kernel source tree (must contain scripts/config)
+/path/to/.config	No	Path to the config file to modify. Defaults to <kernel-source>/.config
+Example
+bash
+git clone --branch v7.1.3 --depth 1 https://github.com/torvalds/linux.git
+cd linux
+make defconfig
+./kernel-hardening.sh . .config
+What it does
+Backs up your existing .config to .config.bak.<timestamp> before making any changes.
+Walks through categories of hardening options (stack protection, heap/slab hardening, usercopy, info-exposure reduction, KASLR, Spectre mitigation, ARM64 hardening, module signing, syscall reduction, LSM/lockdown, /dev/mem restrictions, legacy interface removal, tracing/debug removal, sanitizers, IOMMU/DMA protection, filesystem integrity), enabling or disabling each CONFIG_* symbol via scripts/config -e / -d / --set-val.
+Prints a summary of next steps when finished.
+After running
+Resolve dependencies introduced by the changes:
+bash
+   make -C /path/to/kernel-source olddefconfig
+Add boot cmdline parameters needed for some options to take effect:
+   page_poison=1 slub_debug=P init_on_alloc=1 init_on_free=1
+Review the diff before building:
+bash
+   diff -u /path/to/.config.bak.<timestamp> /path/to/.config
+Verify userspace support for DM_CRYPT, DM_VERITY, DM_INTEGRITY, IMA, and EVM — enabling the kernel config alone does not configure these subsystems; your build/image also needs the matching userspace tooling (cryptsetup, veritysetup, IMA policy, etc.).
+Build and boot-test the kernel. Some hardening options carry a measurable CPU/boot-time cost (e.g. PAGE_POISONING, INIT_ON_ALLOC_DEFAULT_ON) — validate on your target hardware before deploying to production, especially on lower-power ARM devices.
+Notes and caveats
+Not every option applies to every architecture (x86 vs ARM/ARM64); the script attempts to detect architecture from your existing config for DEFAULT_MMAP_MIN_ADDR, but most other options are simply architecture- conditional in the kernel's own Kconfig and will no-op if irrelevant.
+MODULES is left untouched by default. If your system needs loadable modules, keep it enabled and rely on MODULE_SIG_FORCE (enabled by this script) to require valid signatures. If you don't need modules at all, uncomment the disable MODULES line in the script.
+IMA/EVM are enabled for completeness, but Timesys's own guidance is that DM_VERITY is simpler to deploy correctly for most use cases.
+This script is not a substitute for reading the kernel options you're changing — some (e.g. SECCOMP, USER_NS, IO_URING) may break applications that depend on them. Test thoroughly before deploying.
